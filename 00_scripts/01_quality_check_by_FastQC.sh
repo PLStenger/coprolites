@@ -10,7 +10,7 @@
 #SBATCH --mail-user=pierrelouis.stenger@gmail.com
 #SBATCH --mail-type=ALL 
 #SBATCH --error="/home/plstenge/coprolites/00_scripts/01_quality_check_by_FastQC.err"
-#SBATCH --output="/home/plstenge/seda_DNA_Corsican_wrec_HOPSk/00_scripts/01_quality_check_by_FastQC.out"
+#SBATCH --output="/home/plstenge/coprolites/00_scripts/01_quality_check_by_FastQC.out"
 
 # installing FastQC from https://www.bioinformatics.babraham.ac.uk/projects/download.html
 # FastQC v0.11.9 (Mac DMG image)
