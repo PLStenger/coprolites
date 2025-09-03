@@ -25,6 +25,8 @@ LOGFILE="/home/plstenge/coprolites/00_scripts/09_HOPS_homemade_$(date +%Y%m%d_%H
 echo "Logging to $LOGFILE"
 echo "Script started at $(date)" | tee -a "$LOGFILE"
 
+bwa index /home/plstenge/genomes/Ovis_aries.ARS-UI_Ramb_v3.0.dna.toplevel.fa
+
 #declare -A TAXONS=(
 #     ["Triticum"]="4564:/storage/biodatabanks/ensembl/triticum_aestivum/current/fasta/all.fasta"
 #     ["Homo_sapiens"]="9606:/storage/biodatabanks/ucsc/genomes/hg19/Homo_sapiens-hg19_2012-9-19/fasta/chr17.fa"
