@@ -26,15 +26,6 @@ echo "Logging to $LOGFILE"
 echo "Script started at $(date)" | tee -a "$LOGFILE"
 
 #declare -A TAXONS=(
-#    ["Mammals"]="40674"
-#    ["Homo sapiens"]="9606"
-#    ["Magnoliopsida"]="3398"
-#    ["Vitaceae"]="3602"
-#    ["Vitis vinifera"]="29760"
-#    ["Bacteria"]="2"
-#    ["Actinopterygii"]="7898"
-#)
-
 #     ["Triticum"]="4564:/storage/biodatabanks/ensembl/triticum_aestivum/current/fasta/all.fasta"
 #     ["Homo_sapiens"]="9606:/storage/biodatabanks/ucsc/genomes/hg19/Homo_sapiens-hg19_2012-9-19/fasta/chr17.fa"
 #     ["Vitis_vinifera"]="29760:/storage/groups/gdec/shared_paleo/genomes_REF/12Xv2_grapevine_genome_assembly.fa"
@@ -42,9 +33,8 @@ echo "Script started at $(date)" | tee -a "$LOGFILE"
 # Liste de groupes taxonomiques à analyser
 # Tableau associatif : taxon (clef) -> tax_id (valeur) -> génome de référence (chemin)
 declare -A TAXONS=(
-    ["Vitis_vinifera"]="3603:/storage/groups/gdec/shared_paleo/genomes_REF/12Xv2_grapevine_genome_assembly.fa"
+    ["Ovis_aries"]="9940:/home/plstenge/genomes/Ovis_aries.ARS-UI_Ramb_v3.0.dna.toplevel.fa"
 )
-
 
 touch "$LOGFILE"
 echo "Logging to $LOGFILE" | tee -a "$LOGFILE"
