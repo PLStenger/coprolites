@@ -44,6 +44,7 @@ seqkit sliding --window 150 --step 150 "$GENOME" > goat_genome_reads.fa
 echo "Lancement Kraken2..."
 kraken2 --db "$KRAKEN2_DB" \
         --threads $THREADS \
+        --conf 0.2 \
         --output goat_genome.kraken \
         --report goat_genome.report \
         goat_genome_reads.fa
