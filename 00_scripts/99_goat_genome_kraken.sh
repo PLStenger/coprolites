@@ -26,10 +26,10 @@ cd "$WORKDIR"
 ########################################
 # 1. Fractionner le génome en fragments
 ########################################
-# On coupe en fenêtres de 150 bases, chevauchement 0
+# On coupe en fenêtres de 80 bases, chevauchement 0
 echo "Découpage du génome en faux reads..."
 module load seqkit
-seqkit sliding --window 150 --step 150 "$GENOME" > goat_genome_reads.fa
+seqkit sliding --window 80 --step 80 "$GENOME" > goat_genome_reads.fa
 
 ########################################
 # 2. Conversion éventuelle en fastq
@@ -45,8 +45,56 @@ echo "Lancement Kraken2..."
 kraken2 --db "$KRAKEN2_DB" \
         --threads $THREADS \
         --conf 0.2 \
-        --output goat_genome.kraken \
-        --report goat_genome.report \
+        --output goat_genome_80pb_conf_0_2.kraken \
+        --report goat_genome_80pb_conf_0_2.report \
         goat_genome_reads.fa
 
+kraken2 --db "$KRAKEN2_DB" \
+        --threads $THREADS \
+        --conf 0.0 \
+        --output goat_genome_80pb_conf_0_0.kraken \
+        --report goat_genome_80pb_conf_0_0.report \
+        goat_genome_reads.fa
+
+kraken2 --db "$KRAKEN2_DB" \
+        --threads $THREADS \
+        --conf 0.4 \
+        --output goat_genome_80pb_conf_0_4.kraken \
+        --report goat_genome_80pb_conf_0_4.report \
+        goat_genome_reads.fa        
+
+kraken2 --db "$KRAKEN2_DB" \
+        --threads $THREADS \
+        --conf 0.6 \
+        --output goat_genome_80pb_conf_0_6.kraken \
+        --report goat_genome_80pb_conf_0_6.report \
+        goat_genome_reads.fa
+
+kraken2 --db "$KRAKEN2_DB" \
+        --threads $THREADS \
+        --conf 0.8 \
+        --output goat_genome_80pb_conf_0_8.kraken \
+        --report goat_genome_80pb_conf_0_8.report \
+        goat_genome_reads.fa                
+
+kraken2 --db "$KRAKEN2_DB" \
+        --threads $THREADS \
+        --conf 1 \
+        --output goat_genome_80pb_conf_1.kraken \
+        --report goat_genome_80pb_conf_1.report \
+        goat_genome_reads.fa                
+
+
 echo "Analyse terminée. Résultats : goat_genome.report"
+
+
+module load conda/4.12.0
+source ~/.bashrc
+conda activate krona
+
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_0_2.html goat_genome_80pb_conf_0_2.report
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_0_0.html goat_genome_80pb_conf_0_0.report
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_0_4.html goat_genome_80pb_conf_0_4.report
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_0_6.html goat_genome_80pb_conf_0_6.report
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_0_8.html goat_genome_80pb_conf_0_8.report
+ktImportTaxonomy -t 5 -m 3 -o krona_goat_genome_80pb_conf_1.html goat_genome_80pb_conf_1.report
