@@ -31,37 +31,37 @@ conda activate adapterremoval
 
 cd "$WORKING_DIRECTORY"
 
-echo "=== Étape 1: AdapterRemoval - Démultiplexage et trimming ==="
-for r1_file in *_R1.fastq.gz; do
-    r2_file="${r1_file/_R1/_R2}"
-    [[ ! -f "$r2_file" ]] && { echo "ERREUR: Fichier R2 manquant pour $r1_file" >&2; continue; }
-    
-    sample_name=$(get_sample_basename "$r1_file")
-    echo "Traitement: $sample_name"
-    
-    AdapterRemoval \
-        --adapter-list "$ADAPTER_FILE" \
-        --file1 "$r1_file" \
-        --file2 "$r2_file" \
-        --basename "$OUTPUT/${sample_name}_step1" \
-        --trimns \
-        --trimqualities \
-        --minlength 25 \
-        --qualitymax 50 \
-        --collapse \
-        --gzip
-done
+#echo "=== Étape 1: AdapterRemoval - Démultiplexage et trimming ==="
+#for r1_file in *_R1.fastq.gz; do
+#    r2_file="${r1_file/_R1/_R2}"
+#    [[ ! -f "$r2_file" ]] && { echo "ERREUR: Fichier R2 manquant pour $r1_file" >&2; continue; }
+#    
+#    sample_name=$(get_sample_basename "$r1_file")
+#    echo "Traitement: $sample_name"
+#    
+#    AdapterRemoval \
+#        --adapter-list "$ADAPTER_FILE" \
+#        --file1 "$r1_file" \
+#        --file2 "$r2_file" \
+#        --basename "$OUTPUT/${sample_name}_step1" \
+#        --trimns \
+#        --trimqualities \
+#        --minlength 25 \
+#        --qualitymax 50 \
+#        --collapse \
+#        --gzip
+#done
 
 conda deactivate
 
 ############################################################################################################
-# 2) bbduk
+# 2) bbduk - MODIFIÉ pour traiter les collapsed et les pairs séparément
 ############################################################################################################
 
 INPUT_DIR="$OUTPUT"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/03_bbduk"
+OUTPUT_BBDUK="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/03_bbduk"
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_BBDUK"
 
 module load conda/4.12.0
 source ~/.bashrc
@@ -73,18 +73,77 @@ BBDUK=/home/plstenge/bbmap/bbduk.sh
 cd "$INPUT_DIR"
 
 echo "=== Étape 2: BBDuk - Suppression PhiX ==="
-for r1_file in *_step1.pair1.fastq.gz; do
+
+# 2a) Traitement des fichiers collapsed (fusionnés) - single-end
+echo "--- Traitement des fichiers collapsed ---"
+for collapsed_file in *_step1.collapsed.gz; do
+    sample_name=$(echo "$collapsed_file" | sed 's/_step1\.collapsed\.gz$//')
+    echo "Traitement collapsed: $sample_name"
+    
+    $BBDUK -Xmx4g \
+        in="$collapsed_file" \
+        out="$OUTPUT_BBDUK/${sample_name}_step2_collapsed.fastq.gz" \
+        ref="$PHIX" \
+        ktrim=rl \
+        k=23 \
+        mink=11 \
+        hdist=1 \
+        minlen=25 \
+        qtrim=r \
+        trimq=20 \
+        stats="$OUTPUT_BBDUK/${sample_name}_step2_collapsed_stats.txt"
+done
+
+# 2b) Traitement des fichiers collapsed.truncated - single-end
+echo "--- Traitement des fichiers collapsed.truncated ---"
+for collapsed_trunc_file in *_step1.collapsed.truncated.gz; do
+    sample_name=$(echo "$collapsed_trunc_file" | sed 's/_step1\.collapsed\.truncated\.gz$//')
+    echo "Traitement collapsed.truncated: $sample_name"
+    
+    $BBDUK -Xmx4g \
+        in="$collapsed_trunc_file" \
+        out="$OUTPUT_BBDUK/${sample_name}_step2_collapsed_truncated.fastq.gz" \
+        ref="$PHIX" \
+        ktrim=rl \
+        k=23 \
+        mink=11 \
+        hdist=1 \
+        minlen=25 \
+        qtrim=r \
+        trimq=20 \
+        stats="$OUTPUT_BBDUK/${sample_name}_step2_collapsed_truncated_stats.txt"
+done
+
+# 2c) Fusion des collapsed et collapsed.truncated
+echo "--- Fusion des fichiers collapsed ---"
+for collapsed_clean in "$OUTPUT_BBDUK"/*_step2_collapsed.fastq.gz; do
+    sample_name=$(basename "$collapsed_clean" _step2_collapsed.fastq.gz)
+    collapsed_trunc_clean="$OUTPUT_BBDUK/${sample_name}_step2_collapsed_truncated.fastq.gz"
+    
+    if [[ -f "$collapsed_trunc_clean" ]]; then
+        echo "Fusion: $sample_name (collapsed + collapsed.truncated)"
+        cat "$collapsed_clean" "$collapsed_trunc_clean" > "$OUTPUT_BBDUK/${sample_name}_step2_merged_all.fastq.gz"
+        # Garder les fichiers individuels pour debug si nécessaire
+    else
+        echo "Pas de collapsed.truncated pour $sample_name, utilisation du collapsed seul"
+        cp "$collapsed_clean" "$OUTPUT_BBDUK/${sample_name}_step2_merged_all.fastq.gz"
+    fi
+done
+
+# 2d) Traitement des fichiers pair (non-fusionnés) - paired-end
+echo "--- Traitement des fichiers pairs (non-fusionnés) ---"
+for r1_file in *_step1.pair1.truncated.gz; do
     r2_file="${r1_file/pair1/pair2}"
     [[ ! -f "$r2_file" ]] && { echo "ERREUR: Fichier pair2 manquant pour $r1_file" >&2; continue; }
     
-    sample_name=$(echo "$r1_file" | sed 's/_step1\.pair1\.fastq\.gz$//')
-    echo "Traitement: $sample_name"
+    sample_name=$(echo "$r1_file" | sed 's/_step1\.pair1\.truncated\.gz$//')
+    echo "Traitement pairs: $sample_name"
     
     $BBDUK -Xmx4g \
         in1="$r1_file" \
         in2="$r2_file" \
-        out1="$OUTPUT/${sample_name}_step2_R1.fastq.gz" \
-        out2="$OUTPUT/${sample_name}_step2_R2.fastq.gz" \
+        out1="$OUTPUT_BBDUK/${sample_name}_step2_R1.fastq.gz" \
+        out2="$OUTPUT_BBDUK/${sample_name}_step2_R2.fastq.gz" \
         ref="$PHIX" \
         ktrim=rl \
         k=23 \
@@ -95,19 +154,19 @@ for r1_file in *_step1.pair1.fastq.gz; do
         minlen=25 \
         qtrim=r \
         trimq=20 \
-        stats="$OUTPUT/${sample_name}_step2_stats.txt"
+        stats="$OUTPUT_BBDUK/${sample_name}_step2_pairs_stats.txt"
 done
 
 conda deactivate
 
 ############################################################################################################
-# 3) fastuniq
+# 3) fastuniq - MODIFIÉ pour traiter seulement les pairs
 ############################################################################################################
 
-INPUT_DIR="$OUTPUT"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/04_fastuniq"
+INPUT_DIR="$OUTPUT_BBDUK"
+OUTPUT_FASTUNIQ="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/04_fastuniq"
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_FASTUNIQ"
 
 module load conda/4.12.0
 source ~/.bashrc
@@ -118,13 +177,24 @@ cd "$INPUT_DIR" || exit 1
 TMP="/tmp/fastuniq_tmp"
 mkdir -p "$TMP"
 
-echo "=== Étape 3: FastUniq - Suppression des duplicatas ==="
+echo "=== Étape 3: FastUniq - Suppression des duplicatas (pairs seulement) ==="
+
+# 3a) Copie des merged_all (pas de déduplication nécessaire pour les single-end)
+echo "--- Copie des fichiers merged (single-end) ---"
+for merged_file in *_step2_merged_all.fastq.gz; do
+    sample_name=$(echo "$merged_file" | sed 's/_step2_merged_all\.fastq\.gz$//')
+    echo "Copie: $sample_name (merged)"
+    cp "$merged_file" "$OUTPUT_FASTUNIQ/${sample_name}_step3_merged.fastq.gz"
+done
+
+# 3b) FastUniq pour les pairs seulement
+echo "--- FastUniq pour les pairs ---"
 for R1_gz in *_step2_R1.fastq.gz; do
     R2_gz="${R1_gz/_R1.fastq.gz/_R2.fastq.gz}"
     
     if [[ -f "$R2_gz" ]]; then
         sample_name=$(echo "$R1_gz" | sed 's/_step2_R1\.fastq\.gz$//')
-        echo "Traitement: $sample_name"
+        echo "Traitement FastUniq: $sample_name"
 
         R1_tmp="${TMP}/${sample_name}_R1.fastq"
         R2_tmp="${TMP}/${sample_name}_R2.fastq"
@@ -136,8 +206,8 @@ for R1_gz in *_step2_R1.fastq.gz; do
         echo -e "$R1_tmp\n$R2_tmp" > "$listfile"
 
         fastuniq -i "$listfile" -t q \
-            -o "${OUTPUT}/${sample_name}_step3_R1.fastq" \
-            -p "${OUTPUT}/${sample_name}_step3_R2.fastq"
+            -o "${OUTPUT_FASTUNIQ}/${sample_name}_step3_R1.fastq" \
+            -p "${OUTPUT_FASTUNIQ}/${sample_name}_step3_R2.fastq"
 
         rm -f "$R1_tmp" "$R2_tmp" "$listfile"
     else
@@ -149,13 +219,13 @@ rm -rf "$TMP"
 conda deactivate
 
 ############################################################################################################
-# 4) clumpify
+# 4) clumpify - MODIFIÉ pour traiter merged et pairs séparément
 ############################################################################################################
 
-INPUT_DIR="$OUTPUT"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/05_clumpify"
+INPUT_DIR="$OUTPUT_FASTUNIQ"
+OUTPUT_CLUMPIFY="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/05_clumpify"
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_CLUMPIFY"
 
 module load conda/4.12.0
 source ~/.bashrc
@@ -164,17 +234,32 @@ conda activate bbduk
 CLUMPIFY=/home/plstenge/bbmap/clumpify.sh
 
 echo "=== Étape 4: Clumpify - Deduplication avancée ==="
+
+# 4a) Traitement des merged (single-end)
+echo "--- Clumpify pour les merged ---"
+for merged_file in "$INPUT_DIR"/*_step3_merged.fastq.gz; do
+    sample_name=$(basename "$merged_file" _step3_merged.fastq.gz)
+    echo "Traitement Clumpify merged: $sample_name"
+    
+    $CLUMPIFY \
+        in="$merged_file" \
+        out="$OUTPUT_CLUMPIFY/${sample_name}_step4_merged.fastq.gz" \
+        dedupe=t
+done
+
+# 4b) Traitement des pairs
+echo "--- Clumpify pour les pairs ---"
 for R1 in "$INPUT_DIR"/*_step3_R1.fastq; do
     R2="${R1/_R1.fastq/_R2.fastq}"
     
     if [[ -f "$R2" ]]; then
         sample_name=$(basename "$R1" _step3_R1.fastq)
-        echo "Traitement: $sample_name"
+        echo "Traitement Clumpify pairs: $sample_name"
         
         $CLUMPIFY \
             in="$R1" in2="$R2" \
-            out="$OUTPUT/${sample_name}_step4_R1.fastq.gz" \
-            out2="$OUTPUT/${sample_name}_step4_R2.fastq.gz" \
+            out="$OUTPUT_CLUMPIFY/${sample_name}_step4_R1.fastq.gz" \
+            out2="$OUTPUT_CLUMPIFY/${sample_name}_step4_R2.fastq.gz" \
             dedupe=t
     else
         echo "Fichier R2 manquant pour $R1, ignoré."
@@ -184,38 +269,36 @@ done
 conda deactivate
 
 ############################################################################################################
-# 5) fastp
+# 5) fastp - MODIFIÉ pour traiter merged et pairs séparément
 ############################################################################################################
 
-INPUT_DIR="$OUTPUT"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/06_fastp"
+INPUT_DIR="$OUTPUT_CLUMPIFY"
+OUTPUT_FASTP="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/06_fastp"
 LOG_DIR="/home/plstenge/coprolites/00_scripts/05_fastp_out/"
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_FASTP"
 mkdir -p "$LOG_DIR"
 
 module load conda/4.12.0
 source ~/.bashrc
 conda activate fastp
 
-echo "=== Étape 5: Fastp - Nettoyage final et fusion ==="
-for R1 in "$INPUT_DIR"/*_step4_R1.fastq.gz; do
-    R2="${R1/_R1.fastq.gz/_R2.fastq.gz}"
-    
-    sample_name=$(basename "$R1" _step4_R1.fastq.gz)
-    echo "Traitement: $sample_name"
+echo "=== Étape 5: Fastp - Nettoyage final ==="
+
+# 5a) Traitement des merged (single-end) - pas de fusion nécessaire
+echo "--- Fastp pour les merged (single-end) ---"
+for merged_file in "$INPUT_DIR"/*_step4_merged.fastq.gz; do
+    sample_name=$(basename "$merged_file" _step4_merged.fastq.gz)
+    echo "Traitement Fastp merged: $sample_name"
     
     # Fichiers de sortie
-    OUT_R1="$OUTPUT/${sample_name}_step5_R1.fastq.gz"
-    OUT_R2="$OUTPUT/${sample_name}_step5_R2.fastq.gz"
-    MERGED="$OUTPUT/${sample_name}_step5_merged.fastq.gz"
-    HTML="$LOG_DIR/${sample_name}_fastp.html"
-    JSON="$LOG_DIR/${sample_name}_fastp.json"
+    OUT_MERGED="$OUTPUT_FASTP/${sample_name}_step5_merged.fastq.gz"
+    HTML="$LOG_DIR/${sample_name}_merged_fastp.html"
+    JSON="$LOG_DIR/${sample_name}_merged_fastp.json"
     
     fastp \
-        --in1 "$R1" --in2 "$R2" \
-        --out1 "$OUT_R1" --out2 "$OUT_R2" \
-        --merged_out "$MERGED" \
+        --in1 "$merged_file" \
+        --out1 "$OUT_MERGED" \
         --length_required 30 \
         --cut_front --cut_tail \
         --cut_window_size 4 \
@@ -227,51 +310,103 @@ for R1 in "$INPUT_DIR"/*_step4_R1.fastq.gz; do
         --low_complexity_filter \
         --trim_poly_x \
         --poly_x_min_len 10 \
-        --merge --correction \
-        --overlap_len_require 10 \
-        --overlap_diff_limit 5 \
-        --overlap_diff_percent_limit 20 \
         --html "$HTML" \
         --json "$JSON" \
         --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
-        --adapter_sequence_r2 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
         --detect_adapter_for_pe \
         --thread 4
+done
+
+# 5b) Traitement des pairs avec fusion
+echo "--- Fastp pour les pairs (avec fusion) ---"
+for R1 in "$INPUT_DIR"/*_step4_R1.fastq.gz; do
+    R2="${R1/_R1.fastq.gz/_R2.fastq.gz}"
+    
+    if [[ -f "$R2" ]]; then
+        sample_name=$(basename "$R1" _step4_R1.fastq.gz)
+        echo "Traitement Fastp pairs: $sample_name"
+        
+        # Fichiers de sortie
+        OUT_R1="$OUTPUT_FASTP/${sample_name}_step5_R1.fastq.gz"
+        OUT_R2="$OUTPUT_FASTP/${sample_name}_step5_R2.fastq.gz"
+        MERGED_PAIRS="$OUTPUT_FASTP/${sample_name}_step5_merged_from_pairs.fastq.gz"
+        HTML="$LOG_DIR/${sample_name}_pairs_fastp.html"
+        JSON="$LOG_DIR/${sample_name}_pairs_fastp.json"
+        
+        fastp \
+            --in1 "$R1" --in2 "$R2" \
+            --out1 "$OUT_R1" --out2 "$OUT_R2" \
+            --merged_out "$MERGED_PAIRS" \
+            --length_required 30 \
+            --cut_front --cut_tail \
+            --cut_window_size 4 \
+            --cut_mean_quality 10 \
+            --n_base_limit 5 \
+            --unqualified_percent_limit 40 \
+            --complexity_threshold 30 \
+            --qualified_quality_phred 15 \
+            --low_complexity_filter \
+            --trim_poly_x \
+            --poly_x_min_len 10 \
+            --merge --correction \
+            --overlap_len_require 10 \
+            --overlap_diff_limit 5 \
+            --overlap_diff_percent_limit 20 \
+            --html "$HTML" \
+            --json "$JSON" \
+            --adapter_sequence AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
+            --adapter_sequence_r2 AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
+            --detect_adapter_for_pe \
+            --thread 4
+    fi
 done
 
 conda deactivate
 
 ############################################################################################################
-# 6) kraken2
+# 6) kraken2 - MODIFIÉ pour les nouveaux patterns de fichiers
 ############################################################################################################
 
 module load conda/4.12.0
 source ~/.bashrc
 conda activate kraken2
 
-INPUT_DIR="$OUTPUT"
+INPUT_DIR="$OUTPUT_FASTP"
 KRAKEN2_DB="/home/plstenge/k2_core_nt_20250609"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/07_kraken2"
+OUTPUT_KRAKEN="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/07_kraken2"
 THREADS=36
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_KRAKEN"
 
 echo "=== Étape 6: Kraken2 - Classification taxonomique ==="
 
-# 1. Analyse des merged (single-end)
-echo "Analyse Kraken2 des merged (single-end)"
+# 6a) Analyse des merged (provenant des collapsed d'AdapterRemoval)
+echo "Analyse Kraken2 des merged (ex-collapsed)"
 for MERGED in "$INPUT_DIR"/*_step5_merged.fastq.gz; do
     sample_name=$(basename "$MERGED" _step5_merged.fastq.gz)
     echo "Traitement merged: $sample_name"
     
-    OUT_KRAKEN="$OUTPUT/${sample_name}_merged.kraken"
-    OUT_REPORT="$OUTPUT/${sample_name}_merged.report"
+    OUT_KRAKEN="$OUTPUT_KRAKEN/${sample_name}_merged.kraken"
+    OUT_REPORT="$OUTPUT_KRAKEN/${sample_name}_merged.report"
 
     kraken2 --conf 0.2 --db "$KRAKEN2_DB" --threads $THREADS \
         --output "$OUT_KRAKEN" --report "$OUT_REPORT" "$MERGED"
 done
 
-# 2. Analyse des unmerged (paired-end)
+# 6b) Analyse des merged_from_pairs (provenant des pairs fusionnés par fastp)
+echo "Analyse Kraken2 des merged_from_pairs"
+for MERGED_PAIRS in "$INPUT_DIR"/*_step5_merged_from_pairs.fastq.gz; do
+    sample_name=$(basename "$MERGED_PAIRS" _step5_merged_from_pairs.fastq.gz)
+    echo "Traitement merged_from_pairs: $sample_name"
+    
+    OUT_KRAKEN="$OUTPUT_KRAKEN/${sample_name}_merged_from_pairs.kraken"
+    OUT_REPORT="$OUTPUT_KRAKEN/${sample_name}_merged_from_pairs.report"
+
+    kraken2 --conf 0.2 --db "$KRAKEN2_DB" --threads $THREADS \
+        --output "$OUT_KRAKEN" --report "$OUT_REPORT" "$MERGED_PAIRS"
+done
+
+# 6c) Analyse des unmerged (paired-end restants)
 echo "Analyse Kraken2 des unmerged (paired-end)"
 for R1 in "$INPUT_DIR"/*_step5_R1.fastq.gz; do
     sample_name=$(basename "$R1" _step5_R1.fastq.gz)
@@ -280,8 +415,8 @@ for R1 in "$INPUT_DIR"/*_step5_R1.fastq.gz; do
     if [[ -f "$R2" ]]; then
         echo "Traitement unmerged: $sample_name"
         
-        OUT_KRAKEN="$OUTPUT/${sample_name}_unmerged.kraken"
-        OUT_REPORT="$OUTPUT/${sample_name}_unmerged.report"
+        OUT_KRAKEN="$OUTPUT_KRAKEN/${sample_name}_unmerged.kraken"
+        OUT_REPORT="$OUTPUT_KRAKEN/${sample_name}_unmerged.report"
 
         kraken2 --conf 0.2 --paired --db "$KRAKEN2_DB" --threads $THREADS \
             --output "$OUT_KRAKEN" --report "$OUT_REPORT" "$R1" "$R2"
@@ -291,35 +426,35 @@ done
 conda deactivate
 
 ############################################################################################################
-# 7) krona
+# 7) krona - INCHANGÉ
 ############################################################################################################
 
 module load conda/4.12.0
 source ~/.bashrc
 conda activate krona
 
-INPUT_DIR="$OUTPUT"
-OUTPUT="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/08_krona"
+INPUT_DIR="$OUTPUT_KRAKEN"
+OUTPUT_KRONA="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/08_krona"
 
-mkdir -p "$OUTPUT"
+mkdir -p "$OUTPUT_KRONA"
 
 echo "=== Étape 7: Krona - Visualisation taxonomique ==="
 
 cd "$INPUT_DIR"
-ktImportTaxonomy -t 5 -m 3 -o "$OUTPUT/multi-krona.html" "$INPUT_DIR"/*.report 
+ktImportTaxonomy -t 5 -m 3 -o "$OUTPUT_KRONA/multi-krona.html" "$INPUT_DIR"/*.report 
 
 conda deactivate
 
 ############################################################################################################
-# 8) MapDamage
+# 8) MapDamage - MODIFIÉ pour les nouveaux patterns
 ############################################################################################################
 
 module load conda/4.12.0
 source ~/.bashrc
 conda activate mapdamage_py39
 
-KRAKEN_DIR="$INPUT_DIR"  # Répertoire des résultats Kraken2
-FASTQ_DIR="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/06_fastp"  # Répertoire des fichiers FASTQ traités
+KRAKEN_DIR="$OUTPUT_KRAKEN"  # Répertoire des résultats Kraken2
+FASTQ_DIR="$OUTPUT_FASTP"  # Répertoire des fichiers FASTQ traités
 DAMAGE_BASE="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/08_damage"
 LOGFILE="/home/plstenge/coprolites/00_scripts/09_DAMAGE_$(date +%Y%m%d_%H%M%S).txt"
 MAPPING_INFO="/home/plstenge/coprolites/99_AdapterRemoval_pipeline/08_damage/mapping_bwa_info.txt"
@@ -365,8 +500,8 @@ for KRAKEN_FILE in "$KRAKEN_DIR"/*.kraken; do
     KRAKEN_BASE=$(basename "$KRAKEN_FILE" .kraken)
     echo -e "\n==== Processing file: $KRAKEN_FILE ====" | tee -a "$LOGFILE"
     
-    # Extraire le nom de l'échantillon du fichier kraken
-    if [[ "$KRAKEN_BASE" =~ (.+)_(merged|unmerged)$ ]]; then
+    # Extraire le nom de l'échantillon et le type du fichier kraken
+    if [[ "$KRAKEN_BASE" =~ (.+)_(merged|merged_from_pairs|unmerged)$ ]]; then
         PREFIX="${BASH_REMATCH[1]}"
         TYPE="${BASH_REMATCH[2]}"
     else
@@ -377,18 +512,27 @@ for KRAKEN_FILE in "$KRAKEN_DIR"/*.kraken; do
     echo "Prefix: $PREFIX, Type: $TYPE" | tee -a "$LOGFILE"
 
     # Trouver les fichiers FASTQ correspondants
-    if [[ "$TYPE" == "unmerged" ]]; then
-        R1_FILES=("${FASTQ_DIR}/${PREFIX}_step5_R1.fastq"*)
-        R2_FILES=("${FASTQ_DIR}/${PREFIX}_step5_R2.fastq"*)
-        R1_FILE="${R1_FILES[0]:-}"
-        R2_FILE="${R2_FILES[0]:-}"
-        MERGED_FILE=""
-    else
-        MERGED_FILES=("${FASTQ_DIR}/${PREFIX}_step5_merged.fastq"*)
-        MERGED_FILE="${MERGED_FILES[0]:-}"
-        R1_FILE=""
-        R2_FILE=""
-    fi
+    case "$TYPE" in
+        "merged")
+            MERGED_FILES=("${FASTQ_DIR}/${PREFIX}_step5_merged.fastq"*)
+            MERGED_FILE="${MERGED_FILES[0]:-}"
+            R1_FILE=""
+            R2_FILE=""
+            ;;
+        "merged_from_pairs")
+            MERGED_FILES=("${FASTQ_DIR}/${PREFIX}_step5_merged_from_pairs.fastq"*)
+            MERGED_FILE="${MERGED_FILES[0]:-}"
+            R1_FILE=""
+            R2_FILE=""
+            ;;
+        "unmerged")
+            R1_FILES=("${FASTQ_DIR}/${PREFIX}_step5_R1.fastq"*)
+            R2_FILES=("${FASTQ_DIR}/${PREFIX}_step5_R2.fastq"*)
+            R1_FILE="${R1_FILES[0]:-}"
+            R2_FILE="${R2_FILES[0]:-}"
+            MERGED_FILE=""
+            ;;
+    esac
 
     for GROUP in "${!TAXONS[@]}"; do
         TAX_ID="${TAXONS[$GROUP]%:*}"
@@ -433,32 +577,32 @@ for KRAKEN_FILE in "$KRAKEN_DIR"/*.kraken; do
             fi
         fi
         
-        # Traitement des reads merged (single-end)
-        if [[ "$TYPE" == "merged" && -n "$MERGED_FILE" ]]; then
-            echo "Extracting merged reads for $GROUP..." | tee -a "$LOGFILE"
+        # Traitement des reads merged (single-end) - pour merged et merged_from_pairs
+        if [[ ("$TYPE" == "merged" || "$TYPE" == "merged_from_pairs") && -n "$MERGED_FILE" ]]; then
+            echo "Extracting $TYPE reads for $GROUP..." | tee -a "$LOGFILE"
             python3 /home/plstenge/KrakenTools/extract_kraken_reads.py \
                 -k "$KRAKEN_FILE" -s "$MERGED_FILE" -t "$TAX_ID" -o "$OUT_MERGED" --fastq-output 2>>"$LOGFILE"
                 
             if [[ -f "$OUT_MERGED" && -s "$OUT_MERGED" ]]; then
-                echo "Mapping merged reads for $GROUP..." | tee -a "$LOGFILE"
-                bwa aln -n 0.08 -l 24 -k 2 -q 20 -t 4 "$REF_FASTA" "$OUT_MERGED" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sai" 2>>"$LOGFILE"
-                bwa samse "$REF_FASTA" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sai" "$OUT_MERGED" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sam" 2>>"$LOGFILE"
-                samtools view -bS "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sam" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.bam" 2>>"$LOGFILE"
-                samtools sort -o "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sorted.bam" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.bam" 2>>"$LOGFILE"
-                samtools index "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sorted.bam" 2>>"$LOGFILE"
+                echo "Mapping $TYPE reads for $GROUP..." | tee -a "$LOGFILE"
+                bwa aln -n 0.08 -l 24 -k 2 -q 20 -t 4 "$REF_FASTA" "$OUT_MERGED" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sai" 2>>"$LOGFILE"
+                bwa samse "$REF_FASTA" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sai" "$OUT_MERGED" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sam" 2>>"$LOGFILE"
+                samtools view -bS "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sam" > "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.bam" 2>>"$LOGFILE"
+                samtools sort -o "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sorted.bam" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.bam" 2>>"$LOGFILE"
+                samtools index "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sorted.bam" 2>>"$LOGFILE"
                 
-                calculate_mapping_rate "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sorted.bam" "$KRAKEN_BASE" "$GROUP" "merged"
+                calculate_mapping_rate "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sorted.bam" "$KRAKEN_BASE" "$GROUP" "$TYPE"
                 
                 # Nettoyage des fichiers temporaires
-                rm -f "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sai" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sam" \
-                      "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.bam" 2>>"$LOGFILE"
+                rm -f "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sai" "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sam" \
+                      "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.bam" 2>>"$LOGFILE"
                 
                 # Analyse MapDamage
-                mapDamage -i "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_merged.sorted.bam" \
+                mapDamage -i "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_${TYPE}.sorted.bam" \
                           -r "$REF_FASTA" \
-                          --folder "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_mapDamage_merged" 2>>"$LOGFILE"
+                          --folder "${DAMAGE_DIR}/${KRAKEN_BASE}_${GROUP}_mapDamage_${TYPE}" 2>>"$LOGFILE"
             else
-                echo "No reads extracted for $GROUP merged" | tee -a "$LOGFILE"
+                echo "No reads extracted for $GROUP $TYPE" | tee -a "$LOGFILE"
             fi
         fi
     done
@@ -471,14 +615,8 @@ conda deactivate
 
 echo "=== Pipeline terminé avec succès ==="
 
-
-
 ############################################################################################################
-# 9) FastQC all steps
-############################################################################################################
-
-############################################################################################################
-# 9) FastQC + MultiQC pour toutes les étapes
+# 9) FastQC + MultiQC pour toutes les étapes - MODIFIÉ pour les nouveaux patterns
 ############################################################################################################
 
 module load conda/4.12.0
@@ -588,21 +726,33 @@ SUMMARY_FILE="$QC_BASE_DIR/pipeline_summary.txt"
 
 cat > "$SUMMARY_FILE" << EOF
 ===========================================
-RÉSUMÉ DU PIPELINE ADAPTERREMOVAL
+RÉSUMÉ DU PIPELINE ADAPTERREMOVAL MODIFIÉ
 ===========================================
 Date d'analyse: $(date)
 Répertoire de base: $BASE_DIR
+
+MODIFICATIONS APPORTÉES:
+- Traitement séparé des fichiers .collapsed.gz et .collapsed.truncated.gz (fusionnés)
+- Traitement des .pair1.truncated.gz & .pair2.truncated.gz à part
+- Pipeline adapté pour gérer les deux types de données correctement
+- Kraken2 modifié pour traiter merged, merged_from_pairs et unmerged séparément
 
 ÉTAPES ANALYSÉES:
 EOF
 
 for step_name in "${!STEPS_DIRS[@]}"; do
     input_dir="${STEPS_DIRS[$step_name]}"
-    fastq_count=$(find "$input_dir" -name "*.fastq*" -type f 2>/dev/null | wc -l)
-    echo "- $step_name: $fastq_count fichiers FASTQ" >> "$SUMMARY_FILE"
+    if [[ -d "$input_dir" ]]; then
+        fastq_count=$(find "$input_dir" -name "*.fastq*" -type f 2>/dev/null | wc -l)
+        echo "- $step_name: $fastq_count fichiers FASTQ" >> "$SUMMARY_FILE"
+    fi
 done
 
 cat >> "$SUMMARY_FILE" << EOF
+
+TYPES DE FICHIERS TRAITÉS:
+- Collapsed (ex-AdapterRemoval): .collapsed.gz + .collapsed.truncated.gz → merged
+- Pairs (ex-AdapterRemoval): .pair1.truncated.gz + .pair2.truncated.gz → unmerged + merged_from_pairs
 
 RAPPORTS GÉNÉRÉS:
 - Rapport MultiQC global: $MULTIQC_OUTPUT/multiqc_report.html
@@ -613,6 +763,11 @@ Pour visualiser les rapports:
 1. Ouvrir le rapport MultiQC global dans un navigateur
 2. Comparer les statistiques entre les étapes
 3. Identifier les échantillons problématiques
+
+FICHIERS FINAUX POUR ANALYSE:
+- Merged (ex-collapsed): *_step5_merged.fastq.gz
+- Merged from pairs: *_step5_merged_from_pairs.fastq.gz
+- Unmerged pairs: *_step5_R1.fastq.gz + *_step5_R2.fastq.gz
 
 ===========================================
 EOF
@@ -629,6 +784,15 @@ for step_name in "${!STEPS_DIRS[@]}"; do
         echo "$step_name: $fastq_count fichiers"
     fi
 done
+
+echo ""
+echo "=== VÉRIFICATION DES PATTERNS DE FICHIERS FINAUX ==="
+if [[ -d "$OUTPUT_FASTP" ]]; then
+    echo "Fichiers merged (ex-collapsed): $(find "$OUTPUT_FASTP" -name "*_step5_merged.fastq.gz" | wc -l)"
+    echo "Fichiers merged_from_pairs: $(find "$OUTPUT_FASTP" -name "*_step5_merged_from_pairs.fastq.gz" | wc -l)"
+    echo "Fichiers unmerged R1: $(find "$OUTPUT_FASTP" -name "*_step5_R1.fastq.gz" | wc -l)"
+    echo "Fichiers unmerged R2: $(find "$OUTPUT_FASTP" -name "*_step5_R2.fastq.gz" | wc -l)"
+fi
 
 echo ""
 echo "Contrôle qualité terminé avec succès !"
