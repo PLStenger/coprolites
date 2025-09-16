@@ -18,7 +18,8 @@ conda activate kraken2
 
 # Répertoires
 FASTP_DIR="/home/plstenge/coprolites/06_fastp"
-KRAKEN2_DB="/home/plstenge/k2_core_nt_20250609"
+#KRAKEN2_DB="/home/plstenge/k2_core_nt_20250609"
+KRAKEN2_DB="/home/plstenge/k2_nt_20240530"
 OUT_DIR="/home/plstenge/coprolites/07_kraken2"
 THREADS=36
 
@@ -58,3 +59,11 @@ do
 done
 
 echo "Analyse Kraken2 terminée pour tous les échantillons."
+
+OUT_DIR_KRONA="/home/plstenge/coprolites/08_krona"
+
+echo "Krona start"
+ktImportTaxonomy -t 5 -m 3 -o $OUT_DIR_KRONA/multi-krona.html $OUT_DIR/*.report 
+echo "Krona terminés : all"
+
+
