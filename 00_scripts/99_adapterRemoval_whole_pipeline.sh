@@ -613,10 +613,27 @@ echo "Mapping statistics saved in: $MAPPING_INFO" | tee -a "$LOGFILE"
 
 conda deactivate
 
-echo "=== Pipeline terminé avec succès ==="
+############################################################################################################
+# 9) Table assignation
+############################################################################################################
+
+#!/bin/bash
+cd /home/plstenge/coprolites/99_AdapterRemoval_pipeline/07_kraken2
+
+for file in *.report; do
+  base=$(basename "$file" .report)
+  python3 /home/plstenge/coprolites/07_kraken2/KrakenTools/kreport2mpa.py -r "$file" -o "${base}.mpa"
+done
+
+for file in *.mpa; do
+  name=$(basename "$file" .mpa)
+  sed -i "1i #SampleName\t${name}" "$file"
+done
+
+python3 /home/plstenge/coprolites/07_kraken2/KrakenTools/combine_mpa.py -i *.mpa -o combined_mpa.tsv
 
 ############################################################################################################
-# 9) FastQC + MultiQC pour toutes les étapes - MODIFIÉ pour les nouveaux patterns
+# 10) FastQC + MultiQC pour toutes les étapes - MODIFIÉ pour les nouveaux patterns
 ############################################################################################################
 
 module load conda/4.12.0
@@ -799,3 +816,6 @@ echo "Contrôle qualité terminé avec succès !"
 echo "Rapport principal: $MULTIQC_OUTPUT/multiqc_report.html"
 
 conda deactivate
+
+
+echo "=== Pipeline terminé avec succès ==="
