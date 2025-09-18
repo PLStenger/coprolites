@@ -62,6 +62,10 @@ echo "Analyse Kraken2 terminée pour tous les échantillons."
 
 OUT_DIR_KRONA="/home/plstenge/coprolites/08_krona"
 
+module load conda/4.12.0
+source ~/.bashrc
+conda activate krona
+
 echo "Krona start"
 ktImportTaxonomy -t 5 -m 3 -o $OUT_DIR_KRONA/multi-krona.html $OUT_DIR/*.report 
 echo "Krona terminés : all"
