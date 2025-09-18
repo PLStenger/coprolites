@@ -25,8 +25,5 @@ mkdir -p "$OUT_DIR"
 
 cd $IN_DIR
 
-ktImportTaxonomy -t 5 -m 3 -o $OUT_DIR/krona.html $IN_DIR/clean_1129_sed6_rep1_dedup_clumpify_merged.report
-echo "Terminé : clean_1129_sed6_rep1_dedup_clumpify_merged.report"
-
 ktImportTaxonomy -t 5 -m 3 -o $OUT_DIR/multi-krona.html $IN_DIR/*.report 
 echo "Terminé : all"
